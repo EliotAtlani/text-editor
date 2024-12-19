@@ -22,6 +22,7 @@
 #define ABUF_INIT {NULL, 0}
 #define HL_HIGHLIGHT_NUMBERS (1 << 0)
 #define HL_HIGHLIGHT_STRINGS (1 << 1)
+#define GUTTER_WIDTH 6
 
 enum editorKey
 {
@@ -50,7 +51,8 @@ enum editorHighlight
     HL_KEYWORD2,
     HL_MLCOMMENT,
     HL_NUMBER,
-    HL_MATCH
+    HL_MATCH,
+    HL_
 };
 /*** data ***/
 
@@ -645,41 +647,47 @@ void editorInsertChar(int c)
 
 void editorInsertNewline()
 {
-    if (E.cx == 0)
+    if (E.cx == GUTTER_WIDTH)
     {
+        // Insert an empty row before the current row
         editorInsertRow(E.cy, "", 0);
     }
     else
     {
+        // Split the current row at the cursor position
         erow *row = &E.row[E.cy];
-        editorInsertRow(E.cy + 1, &row->chars[E.cx], row->size - E.cx);
+        editorInsertRow(E.cy + 1, &row->chars[E.cx - GUTTER_WIDTH], row->size - (E.cx - GUTTER_WIDTH));
         row = &E.row[E.cy];
-        row->size = E.cx;
+        row->size = E.cx - GUTTER_WIDTH;
         row->chars[row->size] = '\0';
         editorUpdateRow(row);
     }
     E.cy++;
-    E.cx = 0;
+    E.cx = GUTTER_WIDTH;
 }
 void editorDelChar()
 {
     if (E.cy == E.numrows)
         return;
-    if (E.cx == 0 && E.cy == 0)
+    if (E.cx == GUTTER_WIDTH && E.cy == 0)
         return;
 
     erow *row = &E.row[E.cy];
-    if (E.cx > 0)
+    if (E.cx > GUTTER_WIDTH)
     {
-        editorRowDelChar(row, E.cx - 1);
+        editorRowDelChar(row, E.cx - GUTTER_WIDTH - 1);
         E.cx--;
     }
     else
     {
-        E.cx = E.row[E.cy - 1].size;
-        editorRowAppendString(&E.row[E.cy - 1], row->chars, row->size);
-        editorDelRow(E.cy);
-        E.cy--;
+        // Merge with the previous row
+        if (E.cy > 0)
+        {
+            E.cx = E.row[E.cy - 1].size + GUTTER_WIDTH;
+            editorRowAppendString(&E.row[E.cy - 1], row->chars, row->size);
+            editorDelRow(E.cy);
+            E.cy--;
+        }
     }
 }
 
@@ -870,7 +878,6 @@ void abAppend(struct abuf *ab, const char *s, int len)
     ab->b = new;
     ab->len += len;
 }
-
 void abFree(struct abuf *ab)
 {
     free(ab->b);
@@ -937,6 +944,26 @@ void editorDrawRows(struct abuf *ab)
         }
         else
         {
+
+            char linenum[8];
+            snprintf(linenum, sizeof(linenum), "%d", filerow + 1);
+            int num_len = strlen(linenum);
+            int left_padding = (GUTTER_WIDTH - num_len) / 2;
+            int right_padding = GUTTER_WIDTH - num_len - left_padding;
+
+            abAppend(ab, "\x1b[90m", 5); // Set gray color
+            for (int i = 0; i < left_padding; i++)
+            {
+                abAppend(ab, " ", 1);
+            }
+            abAppend(ab, linenum, num_len);
+            for (int i = 0; i < right_padding; i++)
+            {
+                abAppend(ab, " ", 1);
+            }
+            abAppend(ab, "\x1b[39m", 5); // Reset color
+
+            // Row content
             int len = E.row[filerow].rsize - E.coloff;
             if (len < 0)
                 len = 0;
@@ -1111,11 +1138,11 @@ void editorMoveCursor(int key)
         }
         break;
     case ARROW_RIGHT:
-        if (row && E.cx < row->size)
+        if (row && E.cx - GUTTER_WIDTH < row->size)
         {
             E.cx++;
         }
-        else if (row && E.cx == row->size)
+        else if (row && (E.cx - GUTTER_WIDTH) == row->size)
         {
             E.cy++;
             E.cx = 0;
@@ -1137,9 +1164,13 @@ void editorMoveCursor(int key)
 
     row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
     int rowlen = row ? row->size : 0;
-    if (E.cx > rowlen)
+    if ((E.cx - GUTTER_WIDTH) > rowlen)
     {
-        E.cx = rowlen;
+        E.cx = rowlen + GUTTER_WIDTH;
+    }
+    if (E.cx < GUTTER_WIDTH)
+    {
+        E.cx = GUTTER_WIDTH;
     }
 }
 void editorProcessKeypress()
@@ -1172,14 +1203,14 @@ void editorProcessKeypress()
 
     case HOME_KEY:
     case CTRL_ARROW_LEFT:
-        E.cx = 0;
+        E.cx = GUTTER_WIDTH;
         break;
 
     case END_KEY:
     case CTRL_ARROW_RIGHT:
         if (E.cy < E.numrows)
         {
-            E.cx = E.row[E.cy].size;
+            E.cx = E.row[E.cy].size + GUTTER_WIDTH;
         }
         break;
 
@@ -1233,7 +1264,7 @@ void editorProcessKeypress()
 
 void initEditor()
 {
-    E.cx = 0;
+    E.cx = GUTTER_WIDTH;
     E.cy = 0;
     E.numrows = 0;
     E.rowoff = 0;
